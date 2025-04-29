@@ -60,6 +60,9 @@ def or_(*fns):
 def and_(*fns):
   return lambda *args: operator.and_(*(fn(*args) for fn in fns))
 
+def enable_dm(started, params, CP: car.CarParams) -> bool:
+   return (started or params.get_bool("IsDriverViewEnabled")) and params.get_int("DisableDM") == 0
+
 EnableLogger = Params().get_bool('KisaEnableLogger')
 EnableUploader = Params().get_bool('KisaEnableUploader')
 EnableOSM = Params().get_bool('OSMEnable') or Params().get_bool('OSMSpeedLimitEnable') or Params().get("CurvDecelOption", encoding="utf8") in ("1", "3")
