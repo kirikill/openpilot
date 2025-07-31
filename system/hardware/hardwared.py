@@ -369,7 +369,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     #   startup_conditions["registered_device"] = PC or (params.get("DongleId") != UNREGISTERED_DONGLE_ID)
 
     # TODO: this should move to TICI.initialize_hardware, but we currently can't import params there
-    if TICI and HARDWARE.get_device_type() == "tici":
+    #if TICI and HARDWARE.get_device_type() == "tici":
     if False:
       if not os.path.isfile("/persist/comma/living-in-the-moment"):
         if not Path("/data/media").is_mount():
