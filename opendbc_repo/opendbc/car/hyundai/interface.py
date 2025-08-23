@@ -14,7 +14,6 @@ ButtonType = structs.CarState.ButtonEvent.Type
 
 from opendbc.car.hyundai.tunes import LatTunes, set_lat_tune
 from openpilot.common.params import Params
-from decimal import Decimal
 
 Ecu = structs.CarParams.Ecu
 SteerControlType = structs.CarParams.SteerControlType
@@ -41,7 +40,7 @@ class CarInterface(CarInterfaceBase):
 
     params = Params()
 
-    kisaLongAlt = int(params.get("KISALongAlt", encoding="utf8"))
+    kisaLongAlt = params.get("KISALongAlt", return_default=True)
 
     if ret.flags & HyundaiFlags.CANFD:
       # Shared configuration for CAN-FD cars
@@ -188,21 +187,21 @@ class CarInterface(CarInterfaceBase):
     # Common lateral control setup
 
     ret.centerToFront = ret.wheelbase * 0.4
-    ret.steerActuatorDelay = float(Decimal(params.get("SteerActuatorDelayAdj", encoding="utf8")) * Decimal('0.01'))   #0.1
-    ret.steerLimitTimer = float(Decimal(params.get("SteerLimitTimerAdj", encoding="utf8")) * Decimal('0.01'))   #0.4
+    ret.steerActuatorDelay = params.get("SteerActuatorDelayAdj", return_default=True) * 0.01   #0.1
+    ret.steerLimitTimer = params.get("SteerLimitTimerAdj", return_default=True) * 0.01   #0.4
 
-    ret.smoothSteer.method = int( params.get("KisaSteerMethod", encoding="utf8") )   # 1
-    ret.smoothSteer.maxSteeringAngle = float( params.get("KisaMaxSteeringAngle", encoding="utf8") )   # 90
-    ret.smoothSteer.maxDriverAngleWait = float( params.get("KisaMaxDriverAngleWait", encoding="utf8") )  # 0.002
-    ret.smoothSteer.maxSteerAngleWait = float( params.get("KisaMaxSteerAngleWait", encoding="utf8") )   # 0.001  # 10 sec
-    ret.smoothSteer.driverAngleWait = float( params.get("KisaDriverAngleWait", encoding="utf8") )  #0.001
+    ret.smoothSteer.method = params.get("KisaSteerMethod", return_default=True)   # 1
+    ret.smoothSteer.maxSteeringAngle = params.get("KisaMaxSteeringAngle", return_default=True)   # 90
+    ret.smoothSteer.maxDriverAngleWait = params.get("KisaMaxDriverAngleWait", return_default=True)  # 0.002
+    ret.smoothSteer.maxSteerAngleWait = params.get("KisaMaxSteerAngleWait", return_default=True)   # 0.001  # 10 sec
+    ret.smoothSteer.driverAngleWait = params.get("KisaDriverAngleWait", return_default=True)  #0.001
 
     ret.experimentalLong = params.get_bool("AlphaLongitudinalEnabled")
     
     if ret.isAngleControl:    
       ret.steerControlType = SteerControlType.angle
     else:
-      lat_control_method = int(params.get("LateralControlMethod", encoding="utf8"))
+      lat_control_method = params.get("LateralControlMethod", return_default=True)
       if lat_control_method == 0:
         set_lat_tune(ret.lateralTuning, LatTunes.PID)
       elif lat_control_method == 1:

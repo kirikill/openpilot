@@ -1,6 +1,7 @@
 import copy
 import numpy as np
 from opendbc.car import CanBusBase
+from opendbc.car.crc import CRC16_XMODEM
 from opendbc.car.hyundai.values import HyundaiFlags
 from random import randint
 
@@ -44,7 +45,7 @@ class CanBus(CanBusBase):
     return self._cam
 
 
-def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle, max_torque, frame, adrv_160, adrv_1ea, lfa_alt, mdps_info, lfa_info, csw_info, ccnc_161):
+def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle, max_torque, frame, adrv_160, adrv_1ea, lfa_alt, mdps_info, lfa_info, csw_info, ccnc_161, lfa_hda_info):
   common_values = {
     "LKA_MODE": 2,
     "LKA_ICON": 2 if enabled else 1,
@@ -54,6 +55,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     "STEER_MODE": 0,
     "HAS_LANE_SAFETY": 0,  # hide LKAS settings
     "NEW_SIGNAL_2": 0,
+    "DAMP_FACTOR": 100,  # can potentially tuned for better perf [3, 200]
   }
 
   lkas_values = copy.copy(common_values)
@@ -125,19 +127,33 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
         lfa_values["STEER_REQ"] = 0
         lfa_values["HAS_LANE_SAFETY"] = 0
         lfa_values["STEER_MODE"] = 0
-        lfa_values["LKAS_ANGLE_CMD"] = -25.6
+        lfa_values["LKAS_ANGLE_CMD"] = -25.7
         lfa_values["LKAS_ANGLE_ACTIVE"] = 0
-        lfa_values["LKAS_ANGLE_MAX_TORQUE"] = 0
-        lfa_values["NEW_SIGNAL_6"] = 10
+        lfa_values["LKAS_ANGLE_MAX_TORQUE"] = 4
+        lfa_values["NEW_SIGNAL_3"] = 1
+        lfa_values["NEW_SIGNAL_5"] = 1
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, lfa_values))
 
       if frame % 2 == 0 and not CP.openpilotLongitudinalControl:
         adrv_160_values = adrv_160
         adrv_160_values["LFA_FAULT"] = 0
+        adrv_160_values["AEB_SETTING"] = 0
         ret.append(packer.make_can_msg("ADRV_0x160", CAN.ECAN, adrv_160_values))
-      # if frame % 5 == 0:
-      #   adrv_1ea_values = copy.copy(adrv_1ea)
-      #   ret.append(packer.make_can_msg("ADRV_0x1ea", CAN.ECAN, adrv_1ea_values))
+      if frame % 5 == 0:
+        adrv_1ea_values = adrv_1ea
+        adrv_1ea_values["SET_ME_1C"] = 8
+        adrv_1ea_values["NEW_SIGNAL_1"] = 0
+        adrv_1ea_values["NEW_SIGNAL_27"] = 0
+        ret.append(packer.make_can_msg("ADRV_0x1ea", CAN.ECAN, adrv_1ea_values))
+
+        lfa_hda_values = lfa_hda_info
+        lfa_hda_values["HDA_ICON"] = 1 if enabled else 0
+        lfa_hda_values["LFA_ICON"] = 2 if enabled else 0
+        lfa_hda_values["NEW_SIGNAL_1"] = 0
+        lfa_hda_values["NEW_SIGNAL_4"] = 0
+        lfa_hda_values["NEW_SIGNAL_6"] = 0
+        ret.append(packer.make_can_msg("LFAHDA_CLUSTER", CAN.ECAN, lfa_hda_values))
+
     else:
       lfa_values["LKA_MODE"] = 0
       lfa_values["NEW_SIGNAL_1"] = 3 if lat_active else 0
@@ -162,6 +178,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     ret.append(packer.make_can_msg("LFA", CAN.ECAN, lfa_values))
 
   return ret
+
 
 def create_suppress_lfa(packer, CAN, lfa_block_msg, lka_steering_alt, enabled):
   suppress_msg = "CAM_0x362" if lka_steering_alt else "CAM_0x2a4"
@@ -197,6 +214,7 @@ def create_suppress_lfa(packer, CAN, lfa_block_msg, lka_steering_alt, enabled):
   values["RIGHT_LANE_LINE"] = 0 if enabled else 3
   return packer.make_can_msg(suppress_msg, CAN.ACAN, values)
 
+
 def create_buttons(packer, CP, CAN, cruise_btn_info, btn, reset = None, lda_btn = None, regen = None, r_pad = None, l_pad = None):
   if reset:
     values = cruise_btn_info
@@ -230,6 +248,7 @@ def create_buttons(packer, CP, CAN, cruise_btn_info, btn, reset = None, lda_btn 
 
   return packer.make_can_msg("CRUISE_BUTTONS", bus, values)
 
+
 def create_acc_cancel(packer, CP, CAN, cruise_info_copy):
   # TODO: why do we copy different values here?
   if CP.flags & HyundaiFlags.CANFD_CAMERA_SCC.value:
@@ -259,6 +278,7 @@ def create_acc_cancel(packer, CP, CAN, cruise_info_copy):
     "aReqValue": 0.0,
   })
   return packer.make_can_msg("SCC_CONTROL", CAN.ECAN, values)
+
 
 def create_lfahda_cluster(packer, CAN, enabled):
   values = {
@@ -377,38 +397,44 @@ def create_adrv_messages(packer, CAN, frame):
   return ret
 
 
+def hkg_can_fd_checksum(address: int, sig, d: bytearray) -> int:
+  crc = 0
+  for i in range(2, len(d)):
+    crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ d[i]]) & 0xFFFF
+  crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ ((address >> 0) & 0xFF)]) & 0xFFFF
+  crc = ((crc << 8) ^ CRC16_XMODEM[(crc >> 8) ^ ((address >> 8) & 0xFF)]) & 0xFFFF
+  if len(d) == 8:
+    crc ^= 0x5F29
+  elif len(d) == 16:
+    crc ^= 0x041D
+  elif len(d) == 24:
+    crc ^= 0x819D
+  elif len(d) == 32:
+    crc ^= 0x9F5B
+  return crc
+
+
 def create_ccnc(packer, CAN, frame, enabled, lat_active, ccnc_161, ccnc_162, adrv_1ea):
   ret = []
 
   values_161 = ccnc_161
   values_161.update({
-    "FCA_ALT_ICON": 0,
-    "LKA_ICON": 4 if enabled else ccnc_161["LKA_ICON"],
-    "LFA_ICON": 2 if enabled else ccnc_161["LFA_ICON"],
-    "LCA_LEFT_ICON": 2 if enabled else ccnc_161["LCA_LEFT_ICON"],
-    "LCA_RIGHT_ICON": 2 if enabled else ccnc_161["LCA_RIGHT_ICON"],
     "CENTERLINE": 1 if enabled else ccnc_161["CENTERLINE"],
     "LANELINE_LEFT": 2 if enabled else ccnc_161["LANELINE_LEFT"],
     "LANELINE_RIGHT": 2 if enabled else ccnc_161["LANELINE_RIGHT"],
+    "LFA_ICON": 2 if enabled else ccnc_161["LFA_ICON"],
+    "LANELINE_CURVATURE": 15 if enabled else ccnc_161["LANELINE_CURVATURE"],
   })
   ret.append(packer.make_can_msg("CCNC_0x161", CAN.ECAN, values_161))
 
   values_162 = ccnc_162
-  values_162.update({
-    "FAULT_FCA": 0,
-    "FAULT_LFA": 0,
-    "FAULT_LCA": 0,
-    "FAULT_DAS": 0,
-  })
+  # values_162.update({
+  #   "FAULT_FCA": 0,
+  #   "FAULT_LFA": 0,
+  #   "FAULT_LCA": 0,
+  #   "FAULT_DAS": 0,
+  # })
   ret.append(packer.make_can_msg("CCNC_0x162", CAN.ECAN, values_162))
-
-  values_1ea = adrv_1ea
-  values_1ea.update({
-    "SET_ME_1C": 8,
-    "NEW_SIGNAL_1": 0,
-    "NEW_SIGNAL_27": 0,
-  })
-  ret.append(packer.make_can_msg("ADRV_0x1ea", CAN.ECAN, values_1ea))
 
   return ret
 
